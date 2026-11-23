@@ -27,6 +27,11 @@
   var selected = -1, captureRemaining = 0, ended = false, busy = false, paused = false;
   var wins = 0, level = 1, total = 0, computerTimer = null;
   var yt = window.ytgame;
+  var posCount = {}, quiet = 0, captureHappened = false, note = '', hitEls = [];
+
+  // Five difficulties, 20 levels each (levels 1-100 overall).
+  var TIERS = ['Beginner', 'Novice', 'Skilled', 'Master', 'Maharaja'], PER = 20;
+  function tierOf(l) { return Math.floor((l - 1) / PER); }
 
   function makeBoard() {
     svg.innerHTML = '<defs><radialGradient id="gP"><stop stop-color="#fff"/><stop offset="1" stop-color="#e3d6b8"/></radialGradient><radialGradient id="gC"><stop stop-color="#ff8a5c"/><stop offset="1" stop-color="#6b0a05"/></radialGradient></defs>';
@@ -39,7 +44,16 @@
       el('circle',{cx:px(i),cy:py(i),r:4,fill:'#ff7a18'},dots);
       (function(idx){var h=el('circle',{cx:px(idx),cy:py(idx),r:25,fill:'transparent',tabindex:idx===9?0:-1,role:'button','aria-label':'Board point '+(idx+1)},hits);
         h.addEventListener('click',function(){onPoint(idx);});
-        h.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();onPoint(idx);}});
+        hitEls[idx]=h;
+        h.addEventListener('keydown',function(e){
+          if(e.key==='Enter'||e.key===' '){e.preventDefault();onPoint(idx);return;}
+          var v={ArrowRight:[1,0],ArrowLeft:[-1,0],ArrowDown:[0,1],ArrowUp:[0,-1]}[e.key];
+          if(!v)return;e.preventDefault();
+          var best=-1,bc=1e9;
+          for(var q=0;q<24;q++){if(q===idx)continue;var ddx=px(q)-px(idx),ddy=py(q)-py(idx),along=ddx*v[0]+ddy*v[1],perp=Math.abs(ddx*v[1]-ddy*v[0]);
+            if(along<=0)continue;var cost=along+2*perp;if(cost<bc){bc=cost;best=q;}}
+          if(best>=0){hitEls.forEach(function(n){n.setAttribute('tabindex','-1');});hitEls[best].setAttribute('tabindex','0');hitEls[best].focus();}
+        });
       })(i);
     }
   }
@@ -49,8 +63,8 @@
     return completedMills(board,p,who).filter(function(m){return !m.every(function(q){return before[q]===who;});}).length;
   }
   function totalPieces(who) { return hand[who]+board.filter(function(x){return x===who;}).length; }
-  // Stones inside an opponent's mill are protected. If all their stones are protected,
-  // the mill earns no capture rather than falling back to an illegal target.
+  // Stones inside a Tigadi are protected. If ALL of a player's stones are in Tigadis,
+  // this list is empty and the Tigadi captures nothing.
   function targets(who) {
     var safe=[];
     board.forEach(function(x,p){if(x===who&&!isMill(board,p,who))safe.push(p);});
@@ -74,7 +88,6 @@
     if(captureRemaining) {
       targets(3-me).forEach(function(p){el('circle',{cx:px(p),cy:py(p),r:27,fill:'none',stroke:'#ff6f5e','stroke-width':4},h);});
     } else if(!ended&&!busy&&side===me&&!hand[me]) {
-      // Always show every movable stone and its available destinations.
       board.forEach(function(who,from){
         if(who!==me)return;
         var destinations=adj[from].filter(function(to){return !board[to];});
@@ -92,7 +105,8 @@
       $('h'+p).textContent=hand[p]?hand[p]+' left to place':'all placed';$('card'+p).classList.toggle('turn',!ended&&side===p);
     }
     $('stats').textContent='Wins: '+wins+' · Total score: '+total;
-    $('lvl').textContent='Level '+level+' / 100 · '+(level<13?'Beginner':level<36?'Novice':level<66?'Skilled':level<96?'Master':'Maharaja');
+    var t=tierOf(level);
+    $('lvl').textContent=TIERS[t]+' · Level '+(level-t*PER)+' / '+PER;
   }
 
   // Enabled by default; playback begins on the first user gesture to satisfy browser autoplay rules.
@@ -100,37 +114,116 @@
   audio.src=new URL('assets/music.mp3',document.baseURI).href;
   var soundOn=true;
   function startAudio(){if(!soundOn||paused)return;var play=audio.play();if(play&&play.catch)play.catch(function(){});}
-  document.addEventListener('pointerdown',startAudio);document.addEventListener('keydown',startAudio);
+  function startFromGesture(e){if(e&&e.target&&e.target.closest&&e.target.closest('#mute'))return;startAudio();}
+  document.addEventListener('pointerdown',startFromGesture);document.addEventListener('keydown',startFromGesture);
   function stopAudio(){audio.pause();}
+  function applyMasterVolume(){var c=getCtx.ctx;if(c&&getCtx.master){var g=getCtx.master.gain;g.cancelScheduledValues(c.currentTime);g.setValueAtTime(soundOn?1:0,c.currentTime);}}
+  // One switch for everything: music, effects already scheduled, and later effects.
+  function setSound(on){soundOn=!!on;audio.muted=!soundOn;applyMasterVolume();if(soundOn)startAudio();else stopAudio();var m=$('mute');m.textContent=soundOn?'🔊 Sound: On':'🔇 Sound: Off';m.setAttribute('aria-pressed',String(!soundOn));}
+  function getCtx(){
+    var AC=window.AudioContext||window.webkitAudioContext;if(!AC)return null;
+    var ctx=getCtx.ctx;if(!ctx){ctx=getCtx.ctx=new AC();getCtx.master=ctx.createGain();getCtx.master.gain.value=soundOn?1:0;getCtx.master.connect(ctx.destination);}
+    if(ctx.state==='suspended')ctx.resume();return ctx;
+  }
   function playTone(freq,duration){
     if(!soundOn||paused)return;
-    try{var AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;var ctx=playTone.ctx||(playTone.ctx=new AC()),osc=ctx.createOscillator(),gain=ctx.createGain();
-      if(ctx.state==='suspended')ctx.resume();osc.frequency.value=freq;gain.gain.setValueAtTime(0.08,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+duration);osc.connect(gain);gain.connect(ctx.destination);osc.start();osc.stop(ctx.currentTime+duration);
+    try{var ctx=getCtx();if(!ctx)return;var osc=ctx.createOscillator(),gain=ctx.createGain();
+      osc.frequency.value=freq;gain.gain.setValueAtTime(0.08,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+duration);osc.connect(gain);gain.connect(getCtx.master);osc.start();osc.stop(ctx.currentTime+duration);
     }catch(e){}
   }
+  // Applause: a few short bursts of filtered noise.
+  function playClap(){
+    if(!soundOn||paused)return;
+    try{var ctx=getCtx();if(!ctx)return;
+      for(var i=0;i<4;i++){
+        var t=ctx.currentTime+i*0.11,len=Math.floor(ctx.sampleRate*0.07),buf=ctx.createBuffer(1,len,ctx.sampleRate),d=buf.getChannelData(0);
+        for(var j=0;j<len;j++)d[j]=(Math.random()*2-1)*Math.pow(1-j/len,2);
+        var src=ctx.createBufferSource(),bp=ctx.createBiquadFilter(),gain=ctx.createGain();
+        src.buffer=buf;bp.type='bandpass';bp.frequency.value=1800+i*150;bp.Q.value=0.8;gain.gain.value=0.9;
+        src.connect(bp);bp.connect(gain);gain.connect(getCtx.master);src.start(t);
+      }
+    }catch(e){}
+  }
+  function playSad(){playTone(330,0.22);setTimeout(function(){playTone(262,0.35);},200);}
+  function showReaction(emoji){
+    var n=document.createElement('div');n.className='reaction';n.setAttribute('aria-hidden','true');n.textContent=emoji;
+    document.body.appendChild(n);setTimeout(function(){if(n.parentNode)n.parentNode.removeChild(n);},1300);
+  }
+
+  // Computer skill rises with the level: at level 1 it plays mostly at random, at level 100 almost always the best move it can see.
+  function smartChance(){return 0.1+0.85*(level-1)/99;}
+  function scoreMove(m,who){
+    var opp=3-who,b=board.slice();
+    if(m.from>=0)b[m.from]=0;
+    b[m.to]=who;
+    var sc=Math.random()*2;
+    mills.forEach(function(ml){
+      if(ml.indexOf(m.to)<0)return;
+      var mine=0,theirs=0;
+      ml.forEach(function(q){if(q===m.to)return;if(board[q]===who&&q!==m.from)mine++;else if(board[q]===opp)theirs++;});
+      if(mine===2)sc+=10;               // completes a Tigadi
+      else if(theirs===2)sc+=6;         // blocks a rival Tigadi
+      else if(mine===1&&theirs===0)sc+=1.5;
+    });
+    sc+=adj[m.to].filter(function(q){return !b[q];}).length*0.3;
+    return sc;
+  }
+  function pickMove(options,who){
+    if(Math.random()>=smartChance())return options[Math.floor(Math.random()*options.length)];
+    var best=null,bs=-1e9;
+    options.forEach(function(m){var sc=scoreMove(m,who);if(sc>bs){bs=sc;best=m;}});
+    return best;
+  }
+  function pickCapture(choices,who){
+    if(Math.random()>=smartChance())return choices[Math.floor(Math.random()*choices.length)];
+    var victim=3-who,best=choices[0],bs=-1e9;
+    choices.forEach(function(p){
+      var sc=Math.random();
+      mills.forEach(function(ml){
+        if(ml.indexOf(p)<0)return;
+        var own=0,enemy=0;
+        ml.forEach(function(q){if(board[q]===victim)own++;else if(board[q]===who)enemy++;});
+        if(enemy===0)sc+=own*2;
+      });
+      sc+=adj[p].filter(function(q){return !board[q];}).length*0.5;
+      if(sc>bs){bs=sc;best=p;}
+    });
+    return best;
+  }
+
   function endTurn(who){
     selected=-1;captureRemaining=0;
+    var lead=note;note='';
     if(totalPieces(3-who)<=2)return finish(who===me?'win':'lose');
     side=3-who;
     if(!moves(side).length){if(!moves(who).length)return finish('draw');side=who;}
+    // Draw rules: 100 turns without a capture, or the same position three times, once all stones are placed.
+    if(captureHappened){posCount={};quiet=0;captureHappened=false;}
+    else if(!hand[1]&&!hand[2])quiet++;
+    if(quiet>=100)return finish('draw');
+    if(!hand[1]&&!hand[2]){var key=board.join('')+side;posCount[key]=(posCount[key]||0)+1;if(posCount[key]>=3)return finish('draw');}
     render();
-    if(side!==me){busy=true;say('The computer is thinking…');computerTimer=setTimeout(computerMove,450);}
-    else{busy=false;say(hand[me]?'Your move. Place a stone on any empty point.':'Your move. Choose a stone, then an adjacent empty point.');}
+    if(side!==me){busy=true;say(lead+'The computer is thinking…');computerTimer=setTimeout(computerMove,450);}
+    else{busy=false;say(lead+(hand[me]?'Your move. Place a stone on any empty point.':'Your move. Choose a stone, then an adjacent empty point.'));}
   }
   function resolveMove(who,from,to,before){
     var made=Math.min(2,newlyMadeMills(before,to,who));
+    if(made>0&&who===me){playClap();showReaction('👏');}
     var eligible=targets(3-who);
     var captures=Math.min(made,eligible.length);
     if(captures>0&&who===me){captureRemaining=captures;say('<strong>Tigadi!</strong> Choose '+(captures===1?'one enemy stone':'two enemy stones')+' to capture.');render();return;}
-    // Computer captures the same number as the newly formed mills. Protected pieces are never captured.
-    while(captures>0){var choices=targets(3-who);if(!choices.length)break;board[choices[Math.floor(Math.random()*choices.length)]]=0;captures--;playTone(300,0.12);}
+    if(made>0&&who===me&&captures===0)note='<strong>Tigadi!</strong> All enemy stones are protected, so nothing is captured. ';
+    // Computer captures one stone per newly formed Tigadi. Protected stones are never captured.
+    var taken=0;
+    while(captures>0){var choices=targets(3-who);if(!choices.length)break;board[pickCapture(choices,who)]=0;captures--;taken++;captureHappened=true;playTone(300,0.12);}
+    if(taken>0&&who!==me){showReaction('😢');playSad();}
     render();endTurn(who);
   }
   function onPoint(p){
     if(ended||busy||paused||side!==me)return;
     if(captureRemaining>0){
       if(targets(3-me).indexOf(p)<0)return;
-      board[p]=0;captureRemaining--;playTone(300,0.12);render();
+      board[p]=0;captureRemaining--;captureHappened=true;playTone(300,0.12);render();
       if(captureRemaining>0&&targets(3-me).length){say('<strong>Tigadi!</strong> Choose another enemy stone.');return;}
       captureRemaining=0;endTurn(me);return;
     }
@@ -146,8 +239,9 @@
     }
   }
   function computerMove(){
+    computerTimer=null;
     if(ended||paused||side===me)return;
-    var options=moves(side),move=options[Math.floor(Math.random()*options.length)];
+    var options=moves(side),move=options.length?pickMove(options,side):null;
     if(!move){finish('draw');return;}
     var who=side,before=board.slice();
     if(move.from<0)hand[who]--;else board[move.from]=0;
@@ -156,25 +250,32 @@
   function finish(result){
     ended=true;busy=false;selected=-1;captureRemaining=0;
     var text=result==='win'?'Shabash! You win.':result==='lose'?'The computer wins this round.':'A draw.';
-    if(result==='win'){wins++;var score=20*level+50*totalPieces(me);total+=score;level=Math.min(100,level+1);text+=' Score: '+score+'.';}
+    var atTop=level%PER===0;
+    if(result==='win'){wins++;var score=20*level+50*totalPieces(me);total+=score;if(!atTop)level++;text+=' Score: '+score+'.';}
     render();say('<strong>'+text+'</strong>');if(result!=='draw')playTone(result==='win'?660:220,0.35);
-    setTimeout(function(){$('overTitle').textContent=text;$('overText').textContent=result==='win'?'You earned points and advanced to the next level.':'Start another match when you are ready.';var d=$('dlgOver');if(d.showModal)d.showModal();else d.setAttribute('open','');},500);
+    setTimeout(function(){$('overTitle').textContent=text;
+      $('overText').textContent=result==='win'?(atTop?'You cleared the top level of this difficulty. Pick a harder difficulty for more.':'You earned points and advanced to the next level.'):'Start another match when you are ready.';
+      var d=$('dlgOver');if(d.showModal)d.showModal();else d.setAttribute('open','');},500);
   }
   function newGame(){
     if(computerTimer)clearTimeout(computerTimer);
     var d=$('dlgOver');if(d.open&&d.close)d.close();else d.removeAttribute('open');
     board=Array(24).fill(0);hand=[0,12,12];me=parseInt($('first').value,10)||1;side=1;selected=-1;captureRemaining=0;ended=false;busy=false;
-    render();say('Your move. Place a stone on any empty point.');
+    posCount={};quiet=0;captureHappened=false;note='';
+    render();
+    if(side!==me){busy=true;say('The computer plays first…');computerTimer=setTimeout(computerMove,600);}
+    else say('Your move. Place a stone on any empty point.');
   }
   function openDialog(id){var d=$(id);if(d.showModal)d.showModal();else d.setAttribute('open','');}
   makeBoard();
   $('new').addEventListener('click',newGame);$('overAgain').addEventListener('click',newGame);
+  $('diff').addEventListener('change',function(){level=parseInt(this.value,10)*PER+1;newGame();});
   $('overView').addEventListener('click',function(){var d=$('dlgOver');if(d.close)d.close();else d.removeAttribute('open');});
   $('rulesBtn').addEventListener('click',function(){openDialog('dlgRules');});$('rulesBack').addEventListener('click',function(){var d=$('dlgRules');if(d.close)d.close();else d.removeAttribute('open');});
   $('langEn').addEventListener('click',function(){$('rulesHi').hidden=true;$('rulesEn').hidden=false;$('langEn').setAttribute('aria-pressed','true');$('langHi').setAttribute('aria-pressed','false');});
   $('langHi').addEventListener('click',function(){$('rulesHi').hidden=false;$('rulesEn').hidden=true;$('langEn').setAttribute('aria-pressed','false');$('langHi').setAttribute('aria-pressed','true');});
-  $('mute').addEventListener('click',function(){soundOn=!soundOn;this.textContent=soundOn?'🔊 Sound: On':'🔇 Sound: Off';this.setAttribute('aria-pressed',String(!soundOn));if(soundOn)startAudio();else stopAudio();});
+  $('mute').addEventListener('click',function(){setSound(!soundOn);});
   ['dlgRules','dlgOver'].forEach(function(id){$(id).addEventListener('click',function(e){if(e.target===this&&this.close)this.close();});});
-  if(yt){try{yt.system.onPause(function(){paused=true;stopAudio();});yt.system.onResume(function(){paused=false;});yt.system.onAudioEnabledChange(function(on){soundOn=!!on;$('mute').textContent=soundOn?'🔊 Sound: On':'🔇 Sound: Off';if(soundOn)startAudio();else stopAudio();});}catch(e){}}
+  if(yt){try{yt.system.onPause(function(){paused=true;stopAudio();});yt.system.onResume(function(){paused=false;if(!ended&&busy&&side!==me&&!computerTimer)computerTimer=setTimeout(computerMove,300);});yt.system.onAudioEnabledChange(function(on){setSound(on);});}catch(e){}}
   newGame();
 })();
