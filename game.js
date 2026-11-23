@@ -122,10 +122,22 @@
   }
   function onPoint(p) {
     if (ended||busy||paused||side!==me) return;
-    if (capture) { if (targets(3-me).indexOf(p)<0) return; perform({from:-1,to:-1,cap:p},me); return; }
-    if (hand[me]) { if (board[p]) return; board[p]=me; hand[me]--; render();
-      if (isMill(board,p,me)&&targets(3-me).length) { capture=true; say('<strong>Tigadi!</strong> Choose an enemy stone to capture.'); render(); }
-      else finishAction(); return;
+    if (capture) {
+      if (targets(3-me).indexOf(p)<0) return;
+      board[p]=0;
+      capture=false;
+      captureFrom=null;
+      playTone(300,0.12);
+      render();
+      finishAction();
+      return;
+    }
+    if (hand[me] > 0) {
+      if (board[p]) return;
+      board[p]=me; hand[me]--; render();
+      if (isMill(board,p,me)&&targets(3-me).length) { capture=true; captureFrom={from:-1,to:p}; say('<strong>Tigadi!</strong> Choose an enemy stone to capture.'); render(); }
+      else finishAction();
+      return;
     }
     if (selected<0) { if (board[p]===me&&adj[p].some(function(q){return !board[q];})) { selected=p; render(); } return; }
     if (p===selected) { selected=-1; render(); return; }
