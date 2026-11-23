@@ -1,0 +1,789 @@
+(function () {
+var NS = 'http://www.w3.org/2000/svg';
+  var $ = function (id) { return document.getElementById(id); };
+  var svg = $('board');
+  var yt = window.ytgame, paused = false, held = [], soundOn = true, actx = null;
+  function wait(fn, ms) { window.setTimeout(function () { if (paused) held.push(fn); else fn(); }, ms); }
+  function tone(f, at, d, type, vol) {
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      if (actx.state === 'suspended') actx.resume();
+      var o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime + at;
+      o.type = type || 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(vol || 0.12, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + d);
+    } catch (e) {}
+  }
+  function snd(k) {
+    if (!soundOn || paused) return;
+    if (k === 'place') tone(520, 0, 0.12);
+    else if (k === 'slide') tone(380, 0, 0.1);
+    else if (k === 'cap') { tone(300, 0, 0.18, 'triangle'); tone(200, 0.1, 0.25, 'triangle'); }
+    else if (k === 'win') [523, 659, 784, 1047].forEach(function (f, n) { tone(f, n * 0.14, 0.3); });
+    else if (k === 'lose') [392, 330, 262].forEach(function (f, n) { tone(f, n * 0.18, 0.35, 'triangle'); });
+    else tone(330, 0, 0.3);
+  }
+
+  // ENGINE START
+  // Points: ring r (0 outer, 1 middle, 2 inner) * 8 + k, k = 0 NW, 1 N, 2 NE, 3 E, 4 SE, 5 S, 6 SW, 7 W
+  var ADJ = [], LINES = [], LINES_OF = [];
+  var i, r, k;
+  for (i = 0; i < 24; i++) {
+    r = Math.floor(i / 8); k = i % 8;
+    var nb = [r * 8 + (k + 1) % 8, r * 8 + (k + 7) % 8];
+    if (r > 0) nb.push((r - 1) * 8 + k);
+    if (r < 2) nb.push((r + 1) * 8 + k);
+    ADJ[i] = nb;
+    LINES_OF[i] = [];
+  }
+  for (r = 0; r < 3; r++) {
+    for (var s = 0; s < 8; s += 2) LINES.push([r * 8 + s, r * 8 + (s + 1) % 8, r * 8 + (s + 2) % 8]);
+  }
+  for (k = 0; k < 8; k++) LINES.push([k, 8 + k, 16 + k]);
+  LINES.forEach(function (L) { L.forEach(function (p) { LINES_OF[p].push(L); }); });
+
+  function inLine(b, p, o) {
+    var Ls = LINES_OF[p];
+    for (var q = 0; q < Ls.length; q++) {
+      var L = Ls[q];
+      if (b[L[0]] === o && b[L[1]] === o && b[L[2]] === o) return true;
+    }
+    return false;
+  }
+  function targetsOf(b, opp) {
+    var all = [], free = [];
+    for (var p = 0; p < 24; p++) {
+      if (b[p] === opp) { all.push(p); if (!inLine(b, p, opp)) free.push(p); }
+    }
+    return free.length ? free : all;
+  }
+  function tot(b, hand, p) {
+    var n = hand[p];
+    for (var q = 0; q < 24; q++) if (b[q] === p) n++;
+    return n;
+  }
+  function pushMoves(res, b, side, from, to) {
+    // b already has the piece on `to`
+    if (inLine(b, to, side)) {
+      var ts = targetsOf(b, 3 - side);
+      if (ts.length) {
+        for (var q = 0; q < ts.length; q++) res.push({ from: from, to: to, cap: ts[q] });
+        return;
+      }
+    }
+    res.push({ from: from, to: to, cap: -1 });
+  }
+  function gen(b, hand, side) {
+    var res = [], p;
+    if (hand[side] > 0) {
+      for (p = 0; p < 24; p++) {
+        if (b[p] !== 0) continue;
+        b[p] = side;
+        pushMoves(res, b, side, -1, p);
+        b[p] = 0;
+      }
+    } else {
+      for (p = 0; p < 24; p++) {
+        if (b[p] !== side) continue;
+        var a = ADJ[p];
+        for (var q = 0; q < a.length; q++) {
+          if (b[a[q]] !== 0) continue;
+          b[p] = 0; b[a[q]] = side;
+          pushMoves(res, b, side, p, a[q]);
+          b[a[q]] = 0; b[p] = side;
+        }
+      }
+    }
+    return res;
+  }
+  function applyMove(b, hand, side, m) {
+    if (m.from < 0) { b[m.to] = side; hand[side]--; }
+    else { b[m.from] = 0; b[m.to] = side; }
+    if (m.cap >= 0) b[m.cap] = 0;
+  }
+  function evalPos(b, hand, p) {
+    var o = 3 - p;
+    var s = 100 * (tot(b, hand, p) - tot(b, hand, o));
+    for (var q = 0; q < LINES.length; q++) {
+      var L = LINES[q], cp = 0, co = 0, ce = 0;
+      for (var z = 0; z < 3; z++) { var v = b[L[z]]; if (v === p) cp++; else if (v === o) co++; else ce++; }
+      if (cp === 2 && ce === 1) s += 6;
+      if (co === 2 && ce === 1) s -= 7;
+      if (cp === 3) s += 3;
+      if (co === 3) s -= 3;
+    }
+    for (var w = 0; w < 24; w++) {
+      if (b[w] === 0) continue;
+      var n = 0, a = ADJ[w];
+      for (var y = 0; y < a.length; y++) if (b[a[y]] === 0) n++;
+      s += b[w] === p ? n : -n;
+    }
+    return s;
+  }
+  function search(b, hand, side, depth, alpha, beta) {
+    if (tot(b, hand, side) <= 2) return -10000 - depth;
+    var ms = gen(b, hand, side);
+    if (!ms.length) {
+      if (!gen(b, hand, 3 - side).length) return 0;
+      return -search(b, hand, 3 - side, depth - 1, -beta, -alpha);
+    }
+    if (depth <= 0) return evalPos(b, hand, side);
+    ms.sort(function (x, y) { return (y.cap >= 0 ? 1 : 0) - (x.cap >= 0 ? 1 : 0); });
+    var best = -1e9;
+    for (var q = 0; q < ms.length; q++) {
+      var nb = b.slice(), nh = hand.slice();
+      applyMove(nb, nh, side, ms[q]);
+      var v = -search(nb, nh, 3 - side, depth - 1, -beta, -alpha);
+      if (v > best) best = v;
+      if (best > alpha) alpha = best;
+      if (alpha >= beta) break;
+    }
+    return best;
+  }
+  // ENGINE END
+
+  // ---- Dialog helpers (native <dialog>; Esc closes it and is never cancelled by this page)
+  function openDlg(d) {
+    if (d.open) return;
+    if (typeof d.showModal === 'function') d.showModal(); else d.setAttribute('open', '');
+  }
+  function closeDlg(d) {
+    if (!d.open) return;
+    if (typeof d.close === 'function') d.close(); else d.removeAttribute('open');
+  }
+  function anyDialogOpen() { return $('dlgRules').open || $('dlgOver').open; }
+
+  // ---- Rangoli-style mandala, used in the board centre and as a slow-turning backdrop
+  function mandala() {
+    var s = '<circle r="48" fill="none" stroke="#ffc83d" stroke-width="1.5"/><circle r="44" fill="none" stroke="#ffc83d" stroke-width="1" stroke-dasharray="2 3"/>';
+    var n;
+    for (n = 0; n < 12; n++) s += '<ellipse cy="-30" rx="6" ry="13" transform="rotate(' + (n * 30) + ')" fill="rgba(255,200,61,0.2)" stroke="#ffc83d" stroke-width="1.2"/>';
+    for (n = 0; n < 8; n++) s += '<ellipse cy="-14" rx="4.5" ry="10" transform="rotate(' + (n * 45 + 22.5) + ')" fill="rgba(215,38,61,0.6)" stroke="#ffd166" stroke-width="1"/>';
+    s += '<circle r="5" fill="#ffc83d" stroke="#fff0b3"/>';
+    return s;
+  }
+  $('mandalaBg').innerHTML = '<svg viewBox="-50 -50 100 100" width="100%" height="100%">' + mandala() + '</svg>';
+
+  // ---- Drifting ember sparks in the background
+  (function () {
+    var host = $('sparks');
+    for (var n = 0; n < 22; n++) {
+      var sp = document.createElement('span');
+      sp.className = 'sp';
+      sp.style.left = (Math.random() * 100) + 'vw';
+      sp.style.animationDuration = (9 + Math.random() * 12) + 's';
+      sp.style.animationDelay = (-Math.random() * 20) + 's';
+      var sz = 2 + Math.random() * 4;
+      sp.style.width = sp.style.height = sz + 'px';
+      host.appendChild(sp);
+    }
+  })();
+
+  // ---- Geometry for drawing
+  var HW = [210, 150, 90], HH = [165, 115, 65], CX = 260, CY = 210;
+  var DX = [-1, 0, 1, 1, 1, 0, -1, -1], DY = [-1, -1, -1, 0, 1, 1, 1, 0];
+  function px(p) { return CX + DX[p % 8] * HW[Math.floor(p / 8)]; }
+  function py(p) { return CY + DY[p % 8] * HH[Math.floor(p / 8)]; }
+
+  var corner = function (x, y) {
+    var s = '<g transform="translate(' + x + ',' + y + ')">';
+    for (var n = 0; n < 8; n++) s += '<ellipse cy="-7" rx="3" ry="6.5" transform="rotate(' + (n * 45) + ')" fill="#ffc83d" stroke="#a85a00" stroke-width="0.6"/>';
+    s += '<circle r="3.6" fill="#d7263d" stroke="#fff0b3" stroke-width="0.8"/></g>';
+    return s;
+  };
+  svg.innerHTML =
+    '<defs>' +
+    '<radialGradient id="gP" cx="35%" cy="30%" r="75%"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e3d6b8"/></radialGradient>' +
+    '<radialGradient id="gC" cx="35%" cy="30%" r="80%"><stop offset="0" stop-color="#ff8a5c"/><stop offset="0.5" stop-color="#d1281c"/><stop offset="1" stop-color="#6b0a05"/></radialGradient>' +
+    '<radialGradient id="velvet" cx="50%" cy="45%" r="75%"><stop offset="0" style="stop-color:var(--board-a)"/><stop offset="1" style="stop-color:var(--board-b)"/></radialGradient>' +
+    '<linearGradient id="goldEdge" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff0b3"/><stop offset="0.5" stop-color="#ffb627"/><stop offset="1" stop-color="#a85a00"/></linearGradient>' +
+    '<pattern id="diamonds" width="22" height="22" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><path d="M0 0H22M0 0V22" stroke="#ffc83d" stroke-opacity="0.08" stroke-width="1" fill="none"/><circle cx="11" cy="11" r="1.3" fill="#ffc83d" fill-opacity="0.14"/></pattern>' +
+    '</defs>' +
+    '<rect x="4" y="4" width="512" height="412" rx="20" fill="url(#velvet)"/>' +
+    '<rect x="4" y="4" width="512" height="412" rx="20" fill="url(#diamonds)"/>' +
+    '<rect x="4" y="4" width="512" height="412" rx="20" fill="none" stroke="url(#goldEdge)" stroke-width="6"/>' +
+    '<rect x="11.5" y="11.5" width="497" height="397" rx="14" fill="none" stroke="#c81e3a" stroke-width="5"/>' +
+    '<rect x="17" y="17" width="486" height="386" rx="11" fill="none" stroke="#ffc83d" stroke-opacity="0.7" stroke-width="1.5"/>' +
+    '<rect x="21" y="21" width="478" height="378" rx="9" fill="none" stroke="#ffc83d" stroke-opacity="0.3" stroke-width="1" stroke-dasharray="2 5"/>' +
+    corner(32, 32) + corner(488, 32) + corner(32, 388) + corner(488, 388) +
+    '<g transform="translate(260,210)"><circle r="49" fill="rgba(0,0,0,0.25)"/>' + mandala() + '</g>' +
+    '<g id="lineShadow" stroke="#02181d" stroke-opacity="0.6" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"></g>' +
+    '<g id="lines" stroke="var(--line)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"></g>' +
+    '<g id="dots"></g>' +
+    '<g id="hints"></g><g id="stones"></g><g id="fx"></g><g id="hits"></g>';
+  var linesG = $('lines'), shadowG = $('lineShadow'), dotsG = $('dots'), hintsG = $('hints'), stonesG = $('stones'), fxG = $('fx'), hitsG = $('hits');
+  function el(name, attrs, parent) {
+    var e = document.createElementNS(NS, name);
+    for (var key in attrs) e.setAttribute(key, attrs[key]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  for (var rr = 0; rr < 3; rr++) {
+    var ra = { x: CX - HW[rr], y: CY - HH[rr], width: HW[rr] * 2, height: HH[rr] * 2 };
+    el('rect', ra, shadowG);
+    el('rect', ra, linesG);
+  }
+  for (var kk = 0; kk < 8; kk++) {
+    var la = { x1: px(kk), y1: py(kk), x2: px(16 + kk), y2: py(16 + kk) };
+    el('line', la, shadowG);
+    el('line', la, linesG);
+  }
+
+  // ---- Touch, mouse and keyboard input: one invisible target per point
+  var hits = [], lastFocus = 9;
+  function nearestPoint(cur, dir) {
+    var best = -1, bs = 1e9;
+    for (var p = 0; p < 24; p++) {
+      if (p === cur) continue;
+      var vx = px(p) - px(cur), vy = py(p) - py(cur);
+      var along = vx * dir[0] + vy * dir[1];
+      if (along <= 1) continue;
+      var perp = dir[0] !== 0 ? Math.abs(vy) : Math.abs(vx);
+      var score = along + 2 * perp;
+      if (score < bs) { bs = score; best = p; }
+    }
+    return best;
+  }
+  for (var pi = 0; pi < 24; pi++) {
+    el('circle', { cx: px(pi), cy: py(pi), r: 11, fill: '#052f38', stroke: '#ffc83d', 'stroke-width': 2 }, dotsG);
+    el('circle', { cx: px(pi), cy: py(pi), r: 4, fill: '#ff7a18' }, dotsG);
+    (function (idx) {
+      var h = el('circle', { cx: px(idx), cy: py(idx), r: 25, class: 'hit', tabindex: idx === 9 ? 0 : -1, role: 'button', 'data-i': idx,
+        'aria-label': ['Outer', 'Middle', 'Inner'][Math.floor(idx / 8)] + ' square, ' + ['north-west', 'north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west'][idx % 8] }, hitsG);
+      hits[idx] = h;
+      h.addEventListener('click', function () { onPoint(idx); });
+      h.addEventListener('focus', function () {
+        lastFocus = idx;
+        for (var z = 0; z < 24; z++) hits[z].setAttribute('tabindex', z === idx ? '0' : '-1');
+      });
+      h.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPoint(idx); }
+      });
+    })(pi);
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      // Dialogs close themselves. Never cancel the event; just drop a half-made selection.
+      if (!anyDialogOpen() && sel >= 0 && !pending) { sel = -1; drawHints(); }
+      return;
+    }
+    if (anyDialogOpen()) return;
+    var t = e.target;
+    if (t && (t.tagName === 'SELECT' || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+    var dirs = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+    var dir = dirs[e.key];
+    if (!dir) return;
+    e.preventDefault();
+    var ae = document.activeElement;
+    var cur = (ae && ae.classList && ae.classList.contains('hit')) ? parseInt(ae.getAttribute('data-i'), 10) : -1;
+    if (cur < 0) { hits[lastFocus].focus(); return; }
+    var nx = nearestPoint(cur, dir);
+    if (nx >= 0) hits[nx].focus();
+  });
+
+  // ---- Game state (side 1 = Ivory plays first, side 2 = Sindoor). Nothing here resets on window resize.
+  var b = [], hand = [0, 12, 12], els = [], side = 1, me = 1, cpu = 2;
+  var sel = -1, pending = null, busy = false, over = false, noCap = 0, seen = {}, gid = 0;
+
+  function setPos(g, p) { g.style.transform = 'translate(' + px(p) + 'px,' + py(p) + 'px)'; }
+  function makeStone(owner, pos) {
+    var g = el('g', { class: 'peb ' + (owner === 1 ? 'ivory' : 'sindoor') }, stonesG);
+    var fc = owner === 1 ? 'rgba(224,120,20,0.65)' : 'rgba(255,214,110,0.85)';
+    var extra = '<circle r="14.5" fill="none" stroke="' + fc + '" stroke-opacity="0.55" stroke-width="1"/>';
+    for (var n = 0; n < 6; n++) extra += '<ellipse cx="0" cy="-5.2" rx="3" ry="5.4" transform="rotate(' + (n * 60) + ')" fill="' + fc + '"/>';
+    extra += '<circle r="2.3" fill="' + (owner === 1 ? '#c8321f' : '#ffe9a8') + '"/>';
+    extra += '<g fill="rgba(0,0,0,0.13)"><circle cx="-12" cy="6" r="1"/><circle cx="10" cy="12" r="1"/><circle cx="13" cy="-7" r="0.9"/><circle cx="-5" cy="15" r="0.9"/><circle cx="6" cy="-15" r="1"/></g>';
+    g.innerHTML =
+      '<g class="in">' +
+      '<ellipse class="shadow" cx="2" cy="4" rx="21" ry="19"/>' +
+      '<circle r="21" fill="url(#' + (owner === 1 ? 'gP' : 'gC') + ')"/>' +
+      extra +
+      '<circle class="rim" r="21"/>' +
+      '<ellipse class="shine" cx="-6" cy="-8" rx="8" ry="4.5" transform="rotate(-30 -6 -8)"/>' +
+      '</g>';
+    setPos(g, pos);
+    return g;
+  }
+  function setStatus(html) { $('status').innerHTML = html; }
+  function updateScores() {
+    for (var s = 1; s <= 2; s++) {
+      $('s' + s).textContent = tot(b, hand, s);
+      $('n' + s).textContent = (s === me ? 'You' : 'Computer') + ' · ' + (s === 1 ? 'Ivory' : 'Sindoor');
+      $('h' + s).textContent = hand[s] > 0 ? hand[s] + ' left to place' : 'all placed';
+      $('card' + s).classList.toggle('turn', !over && side === s);
+    }
+  }
+
+  function burstAt(p) {
+    var c1 = el('circle', { cx: px(p), cy: py(p), r: 20, class: 'fx' }, fxG);
+    var c2 = el('circle', { cx: px(p), cy: py(p), r: 20, class: 'fx d2' }, fxG);
+    wait(function () { c1.remove(); c2.remove(); }, 900);
+  }
+  function confetti() {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var cols = ['#ff8c1a', '#ffc83d', '#ffd23f', '#d7263d', '#fffdf6', '#2ea44f'];
+    for (var n = 0; n < 80; n++) {
+      var d = document.createElement('div');
+      d.className = 'conf';
+      d.style.left = (Math.random() * 100) + 'vw';
+      d.style.background = cols[Math.floor(Math.random() * cols.length)];
+      d.style.borderRadius = '50% 0 50% 0';
+      d.style.animationDuration = (2.6 + Math.random() * 2.6) + 's';
+      d.style.animationDelay = (Math.random() * 0.9) + 's';
+      document.body.appendChild(d);
+      (function (node) { wait(function () { node.remove(); }, 7000); })(d);
+    }
+  }
+
+  function doPlace(p, to) {
+    snd('place');
+    b[to] = p; hand[p]--;
+    els[to] = makeStone(p, to);
+    updateScores();
+  }
+  function doSlide(p, from, to) {
+    snd('slide');
+    var e = els[from];
+    b[to] = p; b[from] = 0;
+    els[to] = e; els[from] = null;
+    setPos(e, to);
+  }
+  function doRemove(t) {
+    snd('cap');
+    var e = els[t];
+    b[t] = 0; els[t] = null;
+    burstAt(t);
+    if (e) { e.classList.add('gone'); wait(function () { e.remove(); }, 450); }
+    updateScores();
+  }
+  function hasFree(p) {
+    var a = ADJ[p];
+    for (var q = 0; q < a.length; q++) if (b[a[q]] === 0) return true;
+    return false;
+  }
+
+  function drawHints() {
+    hintsG.innerHTML = '';
+    if (over || busy || side !== me) return;
+    if (pending) {
+      for (var q = 0; q < pending.targets.length; q++) {
+        el('circle', { cx: px(pending.targets[q]), cy: py(pending.targets[q]), r: 27, class: 'ring danger pulse' }, hintsG);
+      }
+    } else if (sel >= 0) {
+      el('circle', { cx: px(sel), cy: py(sel), r: 27, class: 'ring' }, hintsG);
+      var a = ADJ[sel];
+      for (var z = 0; z < a.length; z++) {
+        if (b[a[z]] === 0) el('circle', { cx: px(a[z]), cy: py(a[z]), r: 10, class: 'dest' }, hintsG);
+      }
+    }
+  }
+
+  function finish(kind, text) {
+    over = true; busy = false; sel = -1; pending = null;
+    hintsG.innerHTML = '';
+    updateScores();
+    var sc = kind === 'win' ? report() : 0; if (sc) text += winText(sc);
+    $('overAgain').textContent = kind === 'win' ? (lastLevel >= MAXL ? 'Play Again' : 'Next Level') : 'Try Again';
+    var title = kind === 'draw' ? 'A draw.' : kind === 'win' ? 'Shabash! You win.' : 'The computer wins this round.';
+    setStatus('<strong>' + title + '</strong> ' + text);
+    if (kind === 'win') confetti();
+    snd(kind);
+    var my = gid;
+    wait(function () {
+      if (my !== gid || !over) return;
+      $('overTitle').textContent = title;
+      $('overText').textContent = text;
+      openDlg($('dlgOver'));
+    }, 1000);
+  }
+
+  function endTurn(captured, wasSlide) {
+    if (captured && tot(b, hand, 3 - side) <= 2) {
+      if (side === me) finish('win', 'The computer is down to two stones.');
+      else finish('lose', 'You are down to two stones.');
+      return;
+    }
+    if (wasSlide) { if (captured) noCap = 0; else noCap++; }
+    else if (captured) noCap = 0;
+    side = 3 - side;
+    if (!checkDraw()) startTurn();
+  }
+  function checkDraw() {
+    if (hand[1] === 0 && hand[2] === 0) {
+      var key = b.join('') + side;
+      seen[key] = (seen[key] || 0) + 1;
+      if (seen[key] >= 3) { finish('draw', 'The same position appeared three times.'); return true; }
+      if (noCap >= 100) { finish('draw', '100 turns passed without a capture.'); return true; }
+    }
+    return false;
+  }
+
+  function afterAction(to, slide) {
+    if (inLine(b, to, me)) {
+      var t = targetsOf(b, 3 - me);
+      if (t.length) {
+        pending = { targets: t, slide: slide };
+        setStatus('<strong>Tigadi!</strong> Choose one of the glowing enemy stones to pick it up.');
+        drawHints();
+        return;
+      }
+    }
+    endTurn(false, slide);
+  }
+
+  function onPoint(i) {
+    if (paused || over || busy || side !== me) return;
+    if (pending) {
+      if (pending.targets.indexOf(i) >= 0) {
+        var slide = pending.slide;
+        pending = null;
+        hintsG.innerHTML = '';
+        doRemove(i);
+        endTurn(true, slide);
+      }
+      return;
+    }
+    if (hand[me] > 0) {
+      if (b[i] !== 0) return;
+      doPlace(me, i);
+      afterAction(i, false);
+      return;
+    }
+    if (sel < 0) {
+      if (b[i] === me) {
+        if (hasFree(i)) { sel = i; drawHints(); }
+        else setStatus('That stone is hemmed in. Choose another.');
+      }
+      return;
+    }
+    if (i === sel) { sel = -1; drawHints(); return; }
+    if (b[i] === me && hasFree(i)) { sel = i; drawHints(); return; }
+    if (b[i] === 0 && ADJ[sel].indexOf(i) >= 0) {
+      var from = sel;
+      sel = -1;
+      hintsG.innerHTML = '';
+      doSlide(me, from, i);
+      afterAction(i, true);
+    }
+  }
+
+  function startTurn() {
+    if (over) return;
+    updateScores();
+    var ms = gen(b, hand, side);
+    var my = gid;
+    if (!ms.length) {
+      if (!gen(b, hand, 3 - side).length) { finish('draw', 'Neither side can move.'); return; }
+      setStatus(side === me ? 'You have no move available, so your turn is skipped.' : 'The computer has no move available and skips its turn.');
+      busy = true;
+      hintsG.innerHTML = '';
+      noCap++;
+      side = 3 - side;
+      if (checkDraw()) return;
+      wait(function () { if (my !== gid) return; busy = false; startTurn(); }, 1200);
+      return;
+    }
+    if (side === me) {
+      busy = false;
+      if (hand[me] > 0) setStatus('<strong>Your move.</strong> Place a stone on any empty point. ' + hand[me] + ' left in your hand.');
+      else setStatus('<strong>Your move.</strong> Choose one of your stones, then a highlighted point to slide it there.');
+      drawHints();
+    } else {
+      busy = true;
+      hintsG.innerHTML = '';
+      setStatus('The computer is thinking…');
+      wait(function () { if (my === gid) computerTurn(my, ms); }, 600);
+    }
+  }
+
+  function computerTurn(my, ms) {
+    var L = lvlCfg(), d = L.d, noise = L.n;
+    // While stones are still being placed there are many options, so look a little less deep to keep the screen responsive.
+    var dd = hand[cpu] > 0 ? Math.min(d, 3) : d;
+    var best = null, bv = -1e9;
+    for (var q = 0; q < ms.length; q++) {
+      var nb = b.slice(), nh = hand.slice();
+      applyMove(nb, nh, cpu, ms[q]);
+      var v = -search(nb, nh, me, dd - 1, -1e9, 1e9) + Math.random() * noise;
+      if (v > bv) { bv = v; best = ms[q]; }
+    }
+    var m = best;
+    if (m.from < 0) doPlace(cpu, m.to); else doSlide(cpu, m.from, m.to);
+    setStatus(m.cap >= 0 ? 'The computer formed a Tigadi!' : (m.from < 0 ? 'The computer placed a stone.' : 'The computer slid a stone.'));
+    if (m.cap >= 0) {
+      wait(function () {
+        if (my !== gid) return;
+        doRemove(m.cap);
+        setStatus('The computer formed a Tigadi and picked up one of your stones.');
+        wait(function () { if (my === gid) endTurn(true, m.from >= 0); }, 600);
+      }, 600);
+    } else {
+      wait(function () { if (my === gid) endTurn(false, m.from >= 0); }, 450);
+    }
+  }
+
+  function newGame() {
+    gid++;
+    closeDlg($('dlgOver'));
+    stonesG.innerHTML = '';
+    hintsG.innerHTML = '';
+    fxG.innerHTML = '';
+    b = []; els = [];
+    for (var q = 0; q < 24; q++) { b[q] = 0; els[q] = null; }
+    hand = [0, 12, 12];
+    me = parseInt($('first').value, 10);
+    cpu = 3 - me;
+    side = 1; sel = -1; pending = null; noCap = 0; seen = {}; over = false; busy = false;
+    updateScores();
+    startTurn();
+  }
+  function showRules(lang) {
+    var hi = lang === 'hi';
+    $('rulesHi').hidden = !hi;
+    $('rulesEn').hidden = hi;
+    $('langHi').setAttribute('aria-pressed', hi ? 'true' : 'false');
+    $('langEn').setAttribute('aria-pressed', hi ? 'false' : 'true');
+  }
+  $('langEn').addEventListener('click', function () { showRules('en'); });
+  $('langHi').addEventListener('click', function () { showRules('hi'); });
+  $('rulesBtn').addEventListener('click', function () { openDlg($('dlgRules')); });
+  $('rulesBack').addEventListener('click', function () { closeDlg($('dlgRules')); });
+  $('overView').addEventListener('click', function () { closeDlg($('dlgOver')); });
+  $('overAgain').addEventListener('click', newGame);
+  // Tapping or clicking the dimmed area outside a dialog also returns to the game.
+  ['dlgRules', 'dlgOver'].forEach(function (id) {
+    var d = $(id);
+    d.addEventListener('click', function (e) { if (e.target === d) closeDlg(d); });
+  });
+  $('new').addEventListener('click', newGame);
+  var MAXL = 100, lastLevel = 1;
+  var TIERS = [[10, 'Beginner'], [25, 'Novice'], [40, 'Apprentice'], [55, 'Skilled'], [70, 'Expert'], [85, 'Master'], [99, 'Grandmaster'], [100, 'Maharaja']];
+  var stats = { wins: 0, level: 1, total: 0 };
+  function lvlCfg() {
+    var l = Math.min(Math.max(stats.level, 1), MAXL), name = 'Maharaja';
+    for (var i = 0; i < TIERS.length; i++) { if (l <= TIERS[i][0]) { name = TIERS[i][1]; break; } }
+    return { d: l <= 12 ? 1 : l <= 35 ? 2 : l <= 65 ? 3 : 4, n: l >= 95 ? 0 : 70 * Math.pow(0.93, l - 1), name: name };
+  }
+  function safe(p) { if (p && p.catch) p.catch(function () {}); return p; }
+  function showStats() {
+    $('stats').textContent = 'Wins: ' + stats.wins + ' · Total score: ' + stats.total;
+    $('lvl').textContent = 'Level ' + stats.level + ' / ' + MAXL + ' · ' + lvlCfg().name;
+  }
+  function report() {
+    lastLevel = stats.level;
+    var sc = 20 * stats.level + 50 * tot(b, hand, me);
+    stats.wins++; stats.total += sc; stats.level = Math.min(stats.level + 1, MAXL);
+    showStats();
+    if (yt) {
+      try { safe(yt.engagement.sendScore({ value: stats.total })); safe(yt.game.saveData(JSON.stringify(stats))); } catch (e) {}
+    }
+    return sc;
+  }
+  function winText(sc) {
+    if (lastLevel >= MAXL) return ' Score: ' + sc + '. You have conquered all ' + MAXL + ' levels, Maharaja!';
+    return ' Score: ' + sc + '. Level ' + stats.level + ' (' + lvlCfg().name + ') awaits!';
+  }
+
+  // ---- Seamless Audio Manager: Custom Audio Track + Synthesizer Fallback ----
+  var bgAudio = null, bgAudioLoaded = false, usingFileAudio = false;
+  
+  // Try loading assets/music.mp3 or assets/music.wav
+  (function initBgAudio() {
+    try {
+      var audio = new Audio();
+      audio.loop = true;
+      audio.volume = 0.55;
+      
+      // Try mp3 first, then wav
+      var canPlayMp3 = audio.canPlayType('audio/mpeg');
+      audio.src = (canPlayMp3 && canPlayMp3 !== 'no') ? 'assets/music.mp3' : 'assets/music.wav';
+      
+      audio.addEventListener('canplaythrough', function() {
+        bgAudioLoaded = true;
+        usingFileAudio = true;
+      }, { once: true });
+      
+      audio.addEventListener('error', function() {
+        // Fall back to WAV if MP3 failed
+        if (audio.src.indexOf('music.mp3') !== -1) {
+          audio.src = 'assets/music.wav';
+          audio.load();
+        } else {
+          usingFileAudio = false;
+        }
+      });
+      
+      bgAudio = audio;
+      audio.load();
+    } catch(e) {
+      usingFileAudio = false;
+    }
+  })();
+
+  function updateAudioPlayback() {
+    var shouldPlay = soundOn && !paused && mstarted;
+    if (usingFileAudio && bgAudio) {
+      if (shouldPlay) {
+        bgAudio.play().catch(function() {
+          // If browser blocks audio element, fall back to Web Audio synth
+          usingFileAudio = false;
+          musicGain();
+        });
+      } else {
+        bgAudio.pause();
+      }
+    }
+    // Update Web Audio synthesizer gain
+    musicGain();
+  }
+
+  // ---- Rich Meditative Indian Classical Ambient Soundtrack (Synthesizer Fallback) ----
+  var master = null, lp = null, mstarted = false, mbeat = 0, mi = 2;
+  var SCALE = [293.66, 329.63, 369.99, 440.00, 493.88, 587.33, 659.26, 739.99];
+  var CHORDS = [
+    [146.83, 220.00, 293.66, 369.99],
+    [123.47, 185.00, 246.94, 329.63],
+    [97.99,  196.00, 293.66, 369.99],
+    [110.00, 164.81, 220.00, 329.63]
+  ];
+
+  function musicGain() {
+    if (!master || !actx) return;
+    // Only unmute synth if file audio isn't currently handling playback
+    var targetVol = (soundOn && !paused && (!usingFileAudio || (bgAudio && bgAudio.paused))) ? 0.85 : 0.0001;
+    master.gain.setTargetAtTime(targetVol, actx.currentTime, 0.3);
+  }
+
+  function mnote(f, dur, vol, isPluck) {
+    if (!actx || !soundOn || paused || (usingFileAudio && bgAudio && !bgAudio.paused)) return;
+    try {
+      var t = actx.currentTime;
+      var o1 = actx.createOscillator(), o2 = actx.createOscillator();
+      var g = actx.createGain();
+      o1.type = isPluck ? 'triangle' : 'sine';
+      o1.frequency.value = f;
+      o2.type = 'sine';
+      o2.frequency.value = f * 2.01;
+      var peakVol = vol || 0.035;
+      var attack = isPluck ? 0.03 : 0.6;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(peakVol, t + attack);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o1.connect(g); o2.connect(g); g.connect(lp);
+      o1.start(t); o2.start(t);
+      o1.stop(t + dur + 0.1); o2.stop(t + dur + 0.1);
+    } catch(e) {}
+  }
+
+  function musicTick() {
+    if (!soundOn || paused || !actx || (usingFileAudio && bgAudio && !bgAudio.paused)) return;
+    if (mbeat % 8 === 0) {
+      var chord = CHORDS[(Math.floor(mbeat / 8)) % CHORDS.length];
+      for (var ci = 0; ci < chord.length; ci++) mnote(chord[ci], 9.5, 0.024, false);
+    }
+    if (Math.random() < 0.80) {
+      var step = [-2, -1, -1, 0, 1, 1, 2][Math.floor(Math.random() * 7)];
+      mi = Math.max(0, Math.min(SCALE.length - 1, mi + step));
+      var isHigh = mi > 3;
+      var dur = isHigh ? (1.8 + Math.random() * 1.5) : (2.5 + Math.random() * 2.0);
+      mnote(SCALE[mi], dur, 0.042, true);
+    }
+    mbeat++;
+  }
+
+  function startMusic() {
+    if (mstarted) return;
+    mstarted = true;
+    
+    // 1. Try file audio playback
+    if (bgAudio) {
+      bgAudio.play().then(function() {
+        usingFileAudio = true;
+      }).catch(function() {
+        usingFileAudio = false;
+      });
+    }
+
+    // 2. Initialize Web Audio Context
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      actx = actx || new AC();
+      if (actx.state === 'suspended') actx.resume();
+      
+      master = actx.createGain();
+      master.gain.value = 0.0001;
+      
+      lp = actx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 1450;
+      
+      var dl = actx.createDelay(2.0), fb = actx.createGain(), wet = actx.createGain();
+      dl.delayTime.value = 0.55;
+      fb.gain.value = 0.42;
+      wet.gain.value = 0.45;
+      
+      lp.connect(master);
+      master.connect(actx.destination);
+      master.connect(dl);
+      dl.connect(fb);
+      fb.connect(dl);
+      dl.connect(wet);
+      wet.connect(actx.destination);
+      
+      var droneNotes = [73.42, 110.00, 146.83, 220.00];
+      droneNotes.forEach(function (f, idx) {
+        var o = actx.createOscillator(), g = actx.createGain();
+        o.type = idx % 2 === 0 ? 'sine' : 'triangle';
+        o.frequency.value = f + (idx === 1 ? 0.35 : 0);
+        g.gain.value = idx === 0 ? 0.045 : 0.022;
+        o.connect(g);
+        g.connect(lp);
+        o.start();
+      });
+      
+      updateAudioPlayback();
+      musicTick();
+      window.setInterval(musicTick, 850);
+    } catch (e) {}
+  }
+  document.addEventListener('pointerdown', startMusic);
+  var userOn = true, ytOn = true;
+  $('mute').addEventListener('click', function () {
+    userOn = !userOn; soundOn = ytOn && userOn;
+    this.textContent = userOn ? '🔊 Sound: On' : '🔇 Sound: Off';
+    this.setAttribute('aria-pressed', userOn ? 'false' : 'true');
+    updateAudioPlayback();
+  });
+  newGame();
+  showStats();
+  if (yt) {
+    try {
+      yt.system.onPause(function () {
+        paused = true;
+        document.body.classList.add('isPaused');
+        updateAudioPlayback();
+      });
+      yt.system.onResume(function () {
+        paused = false;
+        document.body.classList.remove('isPaused');
+        updateAudioPlayback();
+        var h = held; held = []; h.forEach(function (f) { f(); });
+      });
+      ytOn = yt.system.isAudioEnabled(); soundOn = ytOn && userOn;
+      yt.system.onAudioEnabledChange(function (on) {
+        ytOn = on; soundOn = ytOn && userOn;
+        updateAudioPlayback();
+      });
+      safe(yt.system.getLanguage().then(function (l) { if (/^hi/i.test(l)) showRules('hi'); }));
+    } catch (e) {}
+    window.requestAnimationFrame(function () {
+      try { yt.game.firstFrameReady(); } catch (e) {}
+      var ready = function () { try { yt.game.gameReady(); } catch (e) {} };
+      try {
+        yt.game.loadData().then(function (s) {
+          try { var o = JSON.parse(s); if (o && o.wins >= 0 && o.total >= 0 && o.level >= 1) { o.level = Math.min(o.level, MAXL); stats = o; showStats(); } } catch (e) {}
+        }).catch(function () {}).then(ready);
+      } catch (e) { ready(); }
+    });
+  }
+})();
