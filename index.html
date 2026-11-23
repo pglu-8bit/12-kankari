@@ -147,10 +147,14 @@ dialog ul[lang="hi"] { line-height: 1.65; }
 .dlgBtns { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 16px; }
 .conf { position: fixed; top: -16px; width: 10px; height: 14px; z-index: 50; pointer-events: none; animation: fall linear both; }
 @keyframes fall { to { transform: translateY(110vh) rotate(720deg); } }
+/* Clap / sad reaction emoji shown over the board. */
+.reaction { position: fixed; left: 50%; top: 42%; font-size: clamp(64px, 18vmin, 140px); z-index: 60; pointer-events: none; animation: react 1.2s ease-out both; }
+@keyframes react { from { transform: translate(-50%,-30%) scale(0.3); opacity: 0; } 25% { transform: translate(-50%,-50%) scale(1.2); opacity: 1; } to { transform: translate(-50%,-90%) scale(1); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
   .peb { transition: none; }
   .peb .in, .peb.gone .in, .fx, .dest, .ring.pulse, .score.turn, .lotus, h1, .sp, .mandalaBg { animation: none; }
   .conf, .sparks { display: none; }
+  .reaction { animation: none; transform: translate(-50%,-50%); }
 }
 </style>
 
@@ -185,7 +189,7 @@ dialog ul[lang="hi"] { line-height: 1.65; }
         <path d="M10 49 Q25 45 40 49 T70 49" fill="none" stroke="#ffd166" stroke-width="1.6" stroke-linecap="round"/>
       </svg>
       <h1>Twelve Stones</h1>
-      <div class="hi" lang="hi">बारह कंकरी</div>
+      <div class="hi" lang="hi">बारह कांकरी</div>
       <div class="orn" aria-hidden="true">&#10047; &#10048; &#10047;</div>
       <p class="sub">Place your stones, slide them, and form a Tigadi to win your rival's stones.</p>
       <p class="sub" id="stats"></p>
@@ -200,6 +204,15 @@ dialog ul[lang="hi"] { line-height: 1.65; }
 
     <div class="controls">
       <span class="lvlbadge" id="lvl"></span>
+      <label for="diff">Difficulty
+        <select id="diff">
+          <option value="0" selected>Beginner (1–20)</option>
+          <option value="1">Novice (21–40)</option>
+          <option value="2">Skilled (41–60)</option>
+          <option value="3">Master (61–80)</option>
+          <option value="4">Maharaja (81–100)</option>
+        </select>
+      </label>
       <label for="first">Who plays first
         <select id="first">
           <option value="1" selected>You (Ivory)</option>
@@ -225,19 +238,19 @@ dialog ul[lang="hi"] { line-height: 1.65; }
   </div>
   <ul lang="hi" id="rulesHi" hidden>
     <li><strong>बिसात।</strong> तीन एक-दूसरे के भीतर बने वर्गों पर कुल 24 बिंदु हैं। बाहरी वर्ग से भीतरी वर्ग तक आठ रास्ते जाते हैं: चार हर भुजा के बीच से और चार कोनों से होकर। कोनों वाले रास्ते भी गिने जाते हैं।</li>
-    <li><strong>रखने का चरण।</strong> खेल की शुरुआत सफ़ेद (Ivory) कंकरियाँ करती हैं। बारी-बारी से हर खिलाड़ी किसी भी खाली बिंदु पर एक कंकरी रखता है, जब तक दोनों की सभी 12 कंकरियाँ रख न दी जाएँ। इस चरण में कोई कंकरी सरकाई नहीं जा सकती।</li>
-    <li><strong>चलने का चरण।</strong> सब कंकरियाँ रखी जाने के बाद, हर बारी में आप एक कंकरी को रेखा के साथ पास के खाली बिंदु पर सरकाते हैं। कंकरी कभी दूसरी कंकरी के ऊपर से कूदती नहीं। चाल संभव हो तो चलना ज़रूरी है; कोई चाल न हो तो आपकी बारी छोड़ दी जाती है।</li>
-    <li><strong>तिगड़ी।</strong> एक ही रेखा पर अपनी तीन कंकरियाँ एक कतार में आ जाएँ तो वह तिगड़ी कहलाती है। जिस क्षण आप तिगड़ी पूरी करते हैं, चाहे कंकरी रखते हुए या चलते हुए, आप विरोधी की एक कंकरी उठा लेते हैं। एक साथ दो तिगड़ियाँ बनें तब भी सिर्फ़ एक ही कंकरी मिलती है।</li>
-    <li><strong>तिगड़ी की सुरक्षा।</strong> तिगड़ी में खड़ी कंकरी सुरक्षित रहती है, जब तक विरोधी की सभी कंकरियाँ किसी तिगड़ी के भीतर न हों। दोबारा कंकरी जीतने के लिए अपनी तिगड़ी तोड़ें और अगली बारियों में उसे फिर बनाएँ।</li>
-    <li><strong>जीत और बराबरी।</strong> जो अपने विरोधी को सिर्फ़ दो कंकरियों तक पहुँचा दे, हाथ में बची कंकरियों समेत गिनकर, वही जीतता है। यदि वही स्थिति, उसी खिलाड़ी की बारी के साथ, तीन बार दोहराई जाए, या सब कंकरियाँ रखे जाने के बाद 100 बारियों तक कोई कंकरी न उठाई जाए, तो खेल बराबरी पर छूटता है।</li>
+    <li><strong>रखने का चरण।</strong> खेल की शुरुआत सफ़ेद (Ivory) कांकरियाँ करती हैं। बारी-बारी से हर खिलाड़ी किसी भी खाली बिंदु पर एक कांकरी रखता है, जब तक दोनों की सभी 12 कांकरियाँ रख न दी जाएँ। इस चरण में कोई कांकरी सरकाई नहीं जा सकती।</li>
+    <li><strong>चलने का चरण।</strong> सब कांकरियाँ रखी जाने के बाद, हर बारी में आप एक कांकरी को रेखा के साथ पास के खाली बिंदु पर सरकाते हैं। कांकरी कभी दूसरी कांकरी के ऊपर से कूदती नहीं। चाल संभव हो तो चलना ज़रूरी है; कोई चाल न हो तो आपकी बारी छोड़ दी जाती है।</li>
+    <li><strong>तिगड़ी।</strong> एक ही रेखा पर अपनी तीन कांकरियाँ एक कतार में आ जाएँ तो वह तिगड़ी कहलाती है। जिस क्षण आप तिगड़ी पूरी करते हैं, चाहे कांकरी रखते हुए या चलते हुए, आप विरोधी की एक कांकरी उठा लेते हैं। एक साथ दो तिगड़ियाँ बनें तो आप विरोधी की दो कांकरियाँ उठाते हैं।</li>
+    <li><strong>तिगड़ी की सुरक्षा।</strong> तिगड़ी में खड़ी कांकरी हमेशा सुरक्षित रहती है। यदि विरोधी की सभी कांकरियाँ तिगड़ी के भीतर हों, तो तिगड़ी बनाने पर भी कोई कांकरी नहीं उठती। दोबारा कांकरी जीतने के लिए अपनी तिगड़ी तोड़ें और अगली बारियों में उसे फिर बनाएँ।</li>
+    <li><strong>जीत और बराबरी।</strong> जो अपने विरोधी को सिर्फ़ दो कांकरियों तक पहुँचा दे, हाथ में बची कांकरियों समेत गिनकर, वही जीतता है। यदि वही स्थिति, उसी खिलाड़ी की बारी के साथ, तीन बार दोहराई जाए, या सब कांकरियाँ रखे जाने के बाद 100 बारियों तक कोई कांकरी न उठाई जाए, तो खेल बराबरी पर छूटता है।</li>
     <li><strong>कीबोर्ड।</strong> तीर वाली कुंजियों से बिंदुओं के बीच जाएँ, Enter या Space से चुनें, और Esc से यह खिड़की बंद करें।</li>
   </ul>
   <ul lang="en" id="rulesEn">
     <li><strong>The board.</strong> Three nested squares hold 24 points. Eight paths join the outer square to the inner one: four cross the middle of each side and four run through the corners. Corner paths count as lines too.</li>
     <li><strong>Placing.</strong> Ivory stones play first. Taking turns, each player sets one stone on any empty point until both have laid all 12. No stone may be moved during this stage.</li>
     <li><strong>Moving.</strong> Once every stone is down, you slide one stone per turn along a line to a neighbouring empty point. Stones never jump over others. If a move is available you must take it; if none is, your turn is skipped.</li>
-    <li><strong>The Tigadi.</strong> Three of your stones in a row on one line make a Tigadi. The moment you complete one, whether placing or moving, you pick up one enemy stone. Closing two lines at once still wins only one stone.</li>
-    <li><strong>Tigadi protection.</strong> A stone that sits inside a Tigadi is safe from capture, unless every stone your rival owns is inside a Tigadi. Break your line and close it again on a later turn to capture once more.</li>
+    <li><strong>The Tigadi.</strong> Three of your stones in a row on one line make a Tigadi. The moment you complete one, whether placing or moving, you pick up one enemy stone. Closing two lines at once wins two stones.</li>
+    <li><strong>Tigadi protection.</strong> A stone inside a Tigadi is always safe. If every stone your rival owns is inside a Tigadi, completing a Tigadi captures nothing. Break your line and close it again on a later turn to capture once more.</li>
     <li><strong>Winning and draws.</strong> Reduce your opponent to just two stones, counting any still in hand, and you win. The game is a draw if the same position appears three times with the same player to move, or if 100 turns pass without a capture after all stones are placed.</li>
     <li><strong>Keyboard.</strong> Arrow keys move between points, Enter or Space chooses, and Esc closes this window.</li>
   </ul>
@@ -247,7 +260,7 @@ dialog ul[lang="hi"] { line-height: 1.65; }
 <dialog id="dlgOver" aria-labelledby="overTitle">
   <h2 id="overTitle"></h2>
   <p id="overText"></p>
-  <p>That was the whole match. There are no further levels, so start a new game any time or raise the computer's skill for a tougher one.</p>
+  <p>Win to move up a level, or pick a different difficulty. Start a new game any time.</p>
   <div class="dlgBtns">
     <button type="button" id="overView" class="ghost">View Board</button>
     <button type="button" id="overAgain">Play Again</button>
