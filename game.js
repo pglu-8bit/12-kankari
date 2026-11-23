@@ -109,10 +109,11 @@
     $('lvl').textContent=TIERS[t]+' · Level '+(level-t*PER)+' / '+PER;
   }
 
-  // Enabled by default; playback begins on the first user gesture to satisfy browser autoplay rules.
+  // Sound starts OFF (muted). The player turns it on with the Sound button.
   var audio=new Audio();audio.loop=true;audio.preload='auto';audio.volume=0.45;
+  audio.muted=true;
   audio.src=new URL('assets/music.mp3',document.baseURI).href;
-  var soundOn=true;
+  var soundOn=false;
   function startAudio(){if(!soundOn||paused)return;var play=audio.play();if(play&&play.catch)play.catch(function(){});}
   function startFromGesture(e){if(e&&e.target&&e.target.closest&&e.target.closest('#mute'))return;startAudio();}
   document.addEventListener('pointerdown',startFromGesture);document.addEventListener('keydown',startFromGesture);
@@ -145,6 +146,75 @@
     }catch(e){}
   }
   function playSad(){playTone(330,0.22);setTimeout(function(){playTone(262,0.35);},200);}
+
+  // NEW: cracker "pop" sound (a short low-passed noise burst), follows the Sound button.
+  function playCracker(){
+    if(!soundOn||paused)return;
+    try{var ctx=getCtx();if(!ctx)return;
+      var len=Math.floor(ctx.sampleRate*0.25),buf=ctx.createBuffer(1,len,ctx.sampleRate),d=buf.getChannelData(0);
+      for(var j=0;j<len;j++)d[j]=(Math.random()*2-1)*Math.pow(1-j/len,3);
+      var src=ctx.createBufferSource(),lp=ctx.createBiquadFilter(),gain=ctx.createGain();
+      src.buffer=buf;lp.type='lowpass';lp.frequency.value=1200+Math.random()*1200;gain.gain.value=0.7;
+      src.connect(lp);lp.connect(gain);gain.connect(getCtx.master);src.start();
+    }catch(e){}
+  }
+
+  // NEW: fireworks / crackers shown when the player wins.
+  var fwCanvas=null,fwRaf=0,fwTimers=[];
+  function stopFireworks(){
+    if(fwRaf)cancelAnimationFrame(fwRaf);fwRaf=0;
+    fwTimers.forEach(clearTimeout);fwTimers=[];
+    if(fwCanvas){
+      try{if(fwCanvas.hidePopover)fwCanvas.hidePopover();}catch(e){}
+      if(fwCanvas.parentNode)fwCanvas.parentNode.removeChild(fwCanvas);
+      fwCanvas=null;
+    }
+  }
+  function fireworks(){
+    stopFireworks();
+    if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+    var cv=document.createElement('canvas');
+    cv.setAttribute('aria-hidden','true');
+    var st=cv.style;
+    st.position='fixed';st.left='0';st.top='0';st.width='100%';st.height='100%';
+    st.border='0';st.padding='0';st.margin='0';st.background='transparent';st.overflow='visible';
+    st.pointerEvents='none';st.zIndex='9999';
+    // Popover puts the canvas in the top layer, so it shows above the "You win" dialog.
+    if('popover' in cv)cv.setAttribute('popover','manual');
+    document.body.appendChild(cv);
+    try{if(cv.showPopover)cv.showPopover();}catch(e){}
+    fwCanvas=cv;
+    var dpr=window.devicePixelRatio||1,W=window.innerWidth,H=window.innerHeight;
+    cv.width=W*dpr;cv.height=H*dpr;
+    var c=cv.getContext('2d');c.scale(dpr,dpr);
+    var parts=[],start=performance.now();
+    function burst(){
+      var x=W*(0.15+Math.random()*0.7),y=H*(0.12+Math.random()*0.4),hue=Math.floor(Math.random()*360);
+      for(var i=0;i<70;i++){
+        var a=Math.random()*Math.PI*2,sp=1+Math.random()*4.5;
+        parts.push({x:x,y:y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:1,decay:0.012+Math.random()*0.012,
+          color:'hsl('+Math.floor((hue+Math.random()*40)%360)+',100%,60%)'});
+      }
+      playCracker();
+    }
+    burst();
+    for(var b=1;b<10;b++)fwTimers.push(setTimeout(burst,b*350));
+    function frame(now){
+      c.clearRect(0,0,W,H);
+      for(var i=parts.length-1;i>=0;i--){
+        var q=parts[i];
+        q.vx*=0.985;q.vy=q.vy*0.985+0.04;q.x+=q.vx;q.y+=q.vy;q.life-=q.decay;
+        if(q.life<=0){parts.splice(i,1);continue;}
+        c.globalAlpha=q.life;c.fillStyle=q.color;
+        c.beginPath();c.arc(q.x,q.y,2.2,0,Math.PI*2);c.fill();
+      }
+      c.globalAlpha=1;
+      if(!parts.length&&now-start>3800){stopFireworks();return;}
+      fwRaf=requestAnimationFrame(frame);
+    }
+    fwRaf=requestAnimationFrame(frame);
+  }
+
   function showReaction(emoji){
     var n=document.createElement('div');n.className='reaction';n.setAttribute('aria-hidden','true');n.textContent=emoji;
     document.body.appendChild(n);setTimeout(function(){if(n.parentNode)n.parentNode.removeChild(n);},1300);
@@ -255,9 +325,12 @@
     render();say('<strong>'+text+'</strong>');if(result!=='draw')playTone(result==='win'?660:220,0.35);
     setTimeout(function(){$('overTitle').textContent=text;
       $('overText').textContent=result==='win'?(atTop?'You cleared the top level of this difficulty. Pick a harder difficulty for more.':'You earned points and advanced to the next level.'):'Start another match when you are ready.';
-      var d=$('dlgOver');if(d.showModal)d.showModal();else d.setAttribute('open','');},500);
+      var d=$('dlgOver');if(d.showModal)d.showModal();else d.setAttribute('open','');
+      if(result==='win')fireworks(); // CHANGED: crackers burst on a win (started after the dialog so they show on top)
+    },500);
   }
   function newGame(){
+    stopFireworks(); // NEW: clear crackers when a new game starts
     if(computerTimer)clearTimeout(computerTimer);
     var d=$('dlgOver');if(d.open&&d.close)d.close();else d.removeAttribute('open');
     board=Array(24).fill(0);hand=[0,12,12];me=parseInt($('first').value,10)||1;side=1;selected=-1;captureRemaining=0;ended=false;busy=false;
@@ -276,6 +349,9 @@
   $('langHi').addEventListener('click',function(){$('rulesHi').hidden=false;$('rulesEn').hidden=true;$('langEn').setAttribute('aria-pressed','false');$('langHi').setAttribute('aria-pressed','true');});
   $('mute').addEventListener('click',function(){setSound(!soundOn);});
   ['dlgRules','dlgOver'].forEach(function(id){$(id).addEventListener('click',function(e){if(e.target===this&&this.close)this.close();});});
-  if(yt){try{yt.system.onPause(function(){paused=true;stopAudio();});yt.system.onResume(function(){paused=false;if(!ended&&busy&&side!==me&&!computerTimer)computerTimer=setTimeout(computerMove,300);});yt.system.onAudioEnabledChange(function(on){setSound(on);});}catch(e){}}
+  if(yt){try{yt.system.onPause(function(){paused=true;stopAudio();stopFireworks();});yt.system.onResume(function(){paused=false;if(!ended&&busy&&side!==me&&!computerTimer)computerTimer=setTimeout(computerMove,300);});
+    // The platform can turn sound off, but it can no longer turn it on by itself.
+    yt.system.onAudioEnabledChange(function(on){if(!on)setSound(false);});}catch(e){}}
+  setSound(false); // sets the button label to "Sound: Off" on load
   newGame();
 })();
