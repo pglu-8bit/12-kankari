@@ -29,9 +29,9 @@
   var board = Array(24).fill(0), hand = [0,12,12], side = 1, me = 1;
   var selected = -1, captureRemaining = 0, ended = false, busy = false, paused = false;
   var wins = 0, level = 1, total = 0, computerTimer = null;
-  var yt = window.ytgame;
+  var yt = window.ytgame, inYT = !!(yt && yt.IN_PLAYABLES_ENV); // only obey the YouTube audio setting when really running inside YouTube
   var posCount = {}, quiet = 0, captureHappened = false, note = '', hitEls = [];
-  var gStones, gHints, gFx, stoneEls = {}, lastMove = null;
+  var gStones, gHints, gFx, stoneEls = {}, lastMove = null, pendingLevel = null;
 
   // Five difficulties, 20 levels each (levels 1-100 overall).
   var TIERS = ['Beginner', 'Novice', 'Skilled', 'Master', 'Maharaja'], PER = 20;
@@ -76,7 +76,7 @@
   function fit() {
     var wrap = svg.parentNode, w = wrap.clientWidth, h = wrap.clientHeight;
     if (!w || !h) return;
-    var nh = Math.round(Math.max(390, Math.min(vbW * 1.6, vbW * h / w)));
+    var nh = Math.round(Math.max(390, Math.min(vbW * 1.15, vbW * h / w)));
     if (Math.abs(nh - vbH) < 6) return;
     vbH = nh; makeBoard(); render();
   }
@@ -212,7 +212,12 @@
   audio.muted=false;
   audio.src=new URL('assets/music.mp3',document.baseURI).href;
   var soundOn=true;
-  function startAudio(){if(!soundOn||paused||!audio.paused)return;var play=audio.play();if(play&&play.catch)play.catch(function(){});}
+  var audioOk=false;
+  audio.addEventListener('playing',function(){audioOk=true;});
+  audio.addEventListener('pause',function(){audioOk=false;});
+  audio.addEventListener('error',function(){audioOk=false;});
+  // Retried on every tap until the browser lets the music start.
+  function startAudio(){if(!soundOn||paused||audioOk)return;var play=audio.play();if(play&&play.catch)play.catch(function(){audioOk=false;});}
   function startFromGesture(e){if(e&&e.target&&e.target.closest&&e.target.closest('#mute,#mute2'))return;startAudio();}
   ['pointerdown','pointerup','click','touchend','keydown'].forEach(function(ev){document.addEventListener(ev,startFromGesture);});
   function stopAudio(){audio.pause();}
@@ -419,11 +424,16 @@
   function finish(result){
     ended=true;busy=false;selected=-1;captureRemaining=0;
     var text=result==='win'?'Shabash! You win.':result==='lose'?'The computer wins this round.':'A draw.';
-    var atTop=level%PER===0;
-    if(result==='win'){wins++;var score=20*level+50*totalPieces(me);total+=score;if(!atTop)level++;text+=' Score: '+score+'.';}
+    var atTop=level%PER===0,tier=tierOf(level),doneLv=level-tier*PER;pendingLevel=null;
+    if(result==='win'){wins++;var score=20*level+50*totalPieces(me);total+=score;if(!atTop)level++;else if(tier<TIERS.length-1)pendingLevel=(tier+1)*PER+1;text+=' Score: '+score+'.';}
     render();say('<strong>'+text+'</strong>');if(result!=='draw')playTone(result==='win'?660:220,0.35);
     setTimeout(function(){if(document.body.dataset.screen!=='game')return;$('overTitle').textContent=text;
-      $('overText').textContent=result==='win'?(atTop?'You cleared the top level of this difficulty. Pick a harder difficulty for more.':'You earned points and advanced to the next level.'):'Start another match when you are ready.';
+      var btn=$('overAgain'),ot=$('overText');
+      if(result==='win'){
+        if(!atTop){ot.textContent='Level '+doneLv+' cleared! Ready for Level '+(doneLv+1)+' of '+TIERS[tier]+'?';btn.textContent='Next Level ▶';}
+        else if(pendingLevel){ot.textContent='You cleared every level of '+TIERS[tier]+'! Ready to move up to '+TIERS[tier+1]+'?';btn.textContent='Next: '+TIERS[tier+1]+' ▶';}
+        else{ot.textContent='You cleared every level of the game. Shabash, Maharaja!';btn.textContent='Play Again';}
+      }else{ot.textContent=result==='lose'?'Do not give up. Try this level again!':'Start another match when you are ready.';btn.textContent=result==='lose'?'Try Again':'Play Again';}
       var d=$('dlgOver');if(d.showModal)d.showModal();else d.setAttribute('open','');
       if(result==='win')fireworks(); // CHANGED: crackers burst on a win (started after the dialog so they show on top)
     },500);
@@ -444,13 +454,16 @@
     document.body.dataset.screen=name;
     var a=document.querySelector('.app');a.classList.remove('swap');void a.offsetWidth;a.classList.add('swap');
   }
-  function startGame(){setScreen('game');fit();newGame();}
+  function startGame(){startAudio();setScreen('game');fit();newGame();}
   function goHome(){
     stopFireworks();if(computerTimer){clearTimeout(computerTimer);computerTimer=null;}
     ['dlgOver','dlgRules'].forEach(function(id){var d=$(id);if(d.open&&d.close)d.close();else d.removeAttribute('open');});
     busy=false;ended=true;updateUI();setScreen('menu');
   }
-  $('new').addEventListener('click',startGame);$('restart').addEventListener('click',newGame);$('home').addEventListener('click',goHome);$('overHome').addEventListener('click',goHome);$('mute2').addEventListener('click',function(){setSound(!soundOn);});$('overAgain').addEventListener('click',newGame);
+  $('new').addEventListener('click',startGame);$('restart').addEventListener('click',newGame);$('home').addEventListener('click',goHome);$('overHome').addEventListener('click',goHome);$('mute2').addEventListener('click',function(){setSound(!soundOn);});$('overAgain').addEventListener('click',function(){
+    if(pendingLevel){level=pendingLevel;pendingLevel=null;$('diff').value=String(tierOf(level));}
+    newGame();
+  });
   $('diff').addEventListener('change',function(){level=parseInt(this.value,10)*PER+1;updateUI();});
   $('overView').addEventListener('click',function(){var d=$('dlgOver');if(d.close)d.close();else d.removeAttribute('open');});
   $('rulesBtn').addEventListener('click',function(){openDialog('dlgRules');});$('rulesBack').addEventListener('click',function(){var d=$('dlgRules');if(d.close)d.close();else d.removeAttribute('open');});
@@ -458,10 +471,10 @@
   $('langHi').addEventListener('click',function(){$('rulesHi').hidden=false;$('rulesEn').hidden=true;$('langEn').setAttribute('aria-pressed','false');$('langHi').setAttribute('aria-pressed','true');});
   $('mute').addEventListener('click',function(){setSound(!soundOn);});
   ['dlgRules','dlgOver'].forEach(function(id){$(id).addEventListener('click',function(e){if(e.target===this&&this.close)this.close();});});
-  if(yt){try{yt.system.onPause(function(){paused=true;stopAudio();stopFireworks();});yt.system.onResume(function(){paused=false;if(!ended&&busy&&side!==me&&!computerTimer)computerTimer=setTimeout(computerMove,300);});
+  if(yt){try{yt.system.onPause(function(){paused=true;stopAudio();stopFireworks();});yt.system.onResume(function(){paused=false;startAudio();if(!ended&&busy&&side!==me&&!computerTimer)computerTimer=setTimeout(computerMove,300);});
     // The platform can turn sound off, but it can no longer turn it on by itself.
-    yt.system.onAudioEnabledChange(function(on){if(!on)setSound(false);});}catch(e){}}
-  var startOn=true;try{if(yt&&yt.system&&yt.system.isAudioEnabled&&!yt.system.isAudioEnabled())startOn=false;}catch(e){}
+    if(inYT)yt.system.onAudioEnabledChange(function(on){if(!on)setSound(false);});}catch(e){}}
+  var startOn=true;try{if(inYT&&yt.system&&yt.system.isAudioEnabled&&!yt.system.isAudioEnabled())startOn=false;}catch(e){}
   if(window.ResizeObserver)new ResizeObserver(fit).observe(svg.parentNode);window.addEventListener('resize',fit);
   setSound(startOn); // music on by default (starts at the first tap)
   backdrop();
