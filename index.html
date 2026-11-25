@@ -158,8 +158,8 @@ dialog ul[lang="hi"] { line-height: 1.65; }
 }
 
 /* ===== Two screens: "menu" (title, settings, New Game) and "game" (board + tiny buttons) ===== */
-.mini { display: none; gap: 14px; justify-content: center; align-items: center; }
-.mini button { width: 46px; height: 46px; min-height: 0; padding: 0; font-size: 1.3rem; line-height: 1; border-radius: 50%; display: grid; place-items: center; }
+.mini { display: none; gap: 8px; justify-content: flex-end; align-items: center; min-width: 0; }
+.mini button { flex: none; width: 40px; height: 40px; min-height: 0; padding: 0; font-size: 1.15rem; line-height: 1; border-radius: 50%; display: grid; place-items: center; }
 
 /* Menu screen */
 body[data-screen="menu"] .boardwrap,
@@ -186,13 +186,56 @@ body[data-screen="game"] .dot { width: 18px; height: 18px; }
 body[data-screen="game"] .score b { font-size: 1.4rem; }
 body[data-screen="game"] .status { min-height: 2.2em; font-size: 0.95rem; }
 @media not all and (min-aspect-ratio: 11/10) {
-  body[data-screen="game"] .app { grid-template-rows: auto auto minmax(0, 1fr) auto; grid-template-areas: "bar" "status" "board" "mini"; }
+  body[data-screen="game"] .app { grid-template-rows: auto auto auto minmax(0, 1fr); grid-template-areas: "mini" "bar" "status" "board"; }
   body[data-screen="game"] .mini { grid-area: mini; }
   body[data-screen="game"] .bar { flex-wrap: nowrap; gap: 8px; }
   body[data-screen="game"] .score { flex: 1 1 0; column-gap: 8px; }
   body[data-screen="game"] .score .name { font-size: 0.85rem; }
 }
-@media (min-aspect-ratio: 11/10) { body[data-screen="game"] .mini { margin-top: 6px; } }
+@media (min-aspect-ratio: 11/10) { body[data-screen="game"] .mini { margin-bottom: 4px; } }
+
+/* ===== Level pill (game screen) ===== */
+.lvlpill { flex: 1 1 auto; min-width: 0; padding: 7px 12px; border: 1px solid rgba(255,200,61,0.55); border-radius: 999px; font-weight: 700; font-size: 0.85rem; color: var(--gold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: linear-gradient(90deg, rgba(255,200,61,0.38) var(--p, 0%), rgba(0,0,0,0.28) var(--p, 0%)); transition: background 0.5s; }
+
+/* ===== Stones: drop in, slide, glow inside a Tigadi, vanish when captured ===== */
+.peb .in { animation: none; transform-box: fill-box; transform-origin: center; }
+.peb .in.drop { animation: drop 0.5s cubic-bezier(0.3, 0.9, 0.3, 1) both; }
+.peb .in.slide { animation: slide 0.4s cubic-bezier(0.3, 0.8, 0.3, 1) both; }
+@keyframes drop { 0% { transform: scale(2); opacity: 0; } 55% { transform: scale(0.88); opacity: 1; } 78% { transform: scale(1.1); } 100% { transform: scale(1); } }
+@keyframes slide { from { transform: translate(var(--fx, 0px), var(--fy, 0px)); } }
+.peb .rim { opacity: 0; transition: opacity 0.3s; }
+.peb.mill .rim { opacity: 1; animation: rimglow 1.6s ease-in-out infinite; }
+@keyframes rimglow { 50% { stroke: #fff6c8; stroke-width: 3.5; opacity: 0.6; } }
+.peb.ghost .in { animation: vanish 0.55s ease-in forwards; transform-box: fill-box; transform-origin: center; }
+.peb.ghost { opacity: 1; }
+.spark { fill: #ffd166; animation: sparkfly 0.65s ease-out both; filter: drop-shadow(0 0 4px #ff8c1a); }
+@keyframes sparkfly { to { transform: translate(var(--dx), var(--dy)) scale(0.2); opacity: 0; } }
+.mflash { fill: none; stroke: #fff6c8; stroke-width: 7; stroke-linecap: round; stroke-dasharray: 1; filter: drop-shadow(0 0 6px #ff9a1a) drop-shadow(0 0 14px #ff7a18); animation: mdraw 1.4s ease-out both; }
+@keyframes mdraw { 0% { stroke-dashoffset: 1; opacity: 1; } 35% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
+.dest.dim { opacity: 0.6; animation: none; }
+.score b.bump { animation: bump 0.45s ease-out; }
+@keyframes bump { 40% { transform: scale(1.55); color: #fff; } }
+
+/* ===== Banner, screen change, menu entrance ===== */
+.banner { position: fixed; left: 50%; top: 22%; z-index: 60; pointer-events: none; white-space: nowrap; font-family: var(--font-display); font-size: clamp(1.8rem, 9vmin, 3.4rem); color: #fff0b3; text-shadow: 0 0 18px #ff8c1a, 0 3px 6px rgba(0,0,0,0.7); animation: banner 1.4s ease-out both; }
+@keyframes banner { 0% { transform: translate(-50%, 12px) scale(0.4); opacity: 0; } 20% { transform: translate(-50%, 0) scale(1.15); opacity: 1; } 70% { transform: translate(-50%, -6px) scale(1); opacity: 1; } 100% { transform: translate(-50%, -30px) scale(1); opacity: 0; } }
+.app.swap { animation: swap 0.4s ease-out; }
+@keyframes swap { from { opacity: 0; transform: translateY(10px) scale(0.98); } }
+@keyframes menuIn { from { opacity: 0; transform: translateY(18px); } }
+@keyframes newGlow { 50% { box-shadow: 0 3px 0 #7a3a00, 0 0 28px rgba(255,170,40,0.95); } }
+body[data-screen="menu"] header { animation: menuIn 0.6s both; }
+body[data-screen="menu"] .controls > * { animation: menuIn 0.5s both; }
+body[data-screen="menu"] .controls > :nth-child(1) { animation-delay: 0.1s; }
+body[data-screen="menu"] .controls > :nth-child(2) { animation-delay: 0.18s; }
+body[data-screen="menu"] .controls > :nth-child(3) { animation-delay: 0.26s; }
+body[data-screen="menu"] .controls > :nth-child(4) { animation: menuIn 0.5s 0.34s both, newGlow 2s 1s ease-in-out infinite; }
+body[data-screen="menu"] .controls > :nth-child(5) { animation-delay: 0.42s; }
+body[data-screen="menu"] .controls > :nth-child(6) { animation-delay: 0.5s; }
+.mini button:hover { transform: scale(1.1) rotate(-6deg); }
+@media (prefers-reduced-motion: reduce) {
+  .peb .in.drop, .peb .in.slide, .peb.mill .rim, .mflash, .spark, .banner, .app.swap, header, .controls > *, .score b.bump { animation: none !important; }
+}
 </style>
 
 <svg class="toran" aria-hidden="true" preserveAspectRatio="none">
@@ -239,7 +282,8 @@ body[data-screen="game"] .status { min-height: 2.2em; font-size: 0.95rem; }
 
     <p class="status" id="status" aria-live="polite"></p>
 
-    <div class="mini" role="group" aria-label="Game buttons">
+    <div class="mini" role="group" aria-label="Level and game buttons">
+      <span class="lvlpill" id="lvl2" aria-live="polite"></span>
       <button type="button" id="restart" class="ghost" title="Restart" aria-label="Restart game">&#8635;</button>
       <button type="button" id="home" class="ghost" title="Home" aria-label="Home">&#127968;</button>
       <button type="button" id="mute2" class="ghost" title="Sound" aria-label="Sound on or off">&#128263;</button>
