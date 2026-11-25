@@ -236,6 +236,9 @@ body[data-screen="menu"] .controls > :nth-child(6) { animation-delay: 0.5s; }
 @media (prefers-reduced-motion: reduce) {
   .peb .in.drop, .peb .in.slide, .peb.mill .rim, .mflash, .spark, .banner, .app.swap, header, .controls > *, .score b.bump { animation: none !important; }
 }
+@media not all and (min-aspect-ratio: 11/10) {
+  body[data-screen="game"] .app { padding-left: max(6px, env(safe-area-inset-left, 0px)); padding-right: max(6px, env(safe-area-inset-right, 0px)); }
+}
 </style>
 
 <svg class="toran" aria-hidden="true" preserveAspectRatio="none">
