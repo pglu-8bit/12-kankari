@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset=utf8><script src="https://www.youtube.com/game_api/v1"></script><title>Twelve Stones</title><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="stylesheet" href="style.css"></head><body>
+<!doctype html><html lang="en"><head><meta charset=utf8><script src="https://www.youtube.com/game_api/v1"></script><title>Twelve Stones</title><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="stylesheet" href="style.css"></head><body data-screen="menu">
   <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
   <link rel="apple-touch-icon" href="assets/icon.png">
   <link rel="icon" type="image/png" href="assets/icon.png">
@@ -68,7 +68,7 @@ header { grid-area: head; text-align: center; }
   .controls { justify-content: flex-start; }
 }
 /* Short screens: trim decoration so everything still fits. */
-@media (max-height: 640px) { .sub, .orn { display: none; } .lotus { display: none; } }
+@media (max-height: 640px) { .sub:not(#stats), .orn { display: none; } .lotus { display: none; } }
 @media (max-height: 460px) { .hi { display: none; } .score { padding: 6px 10px; } .status { min-height: 0; font-size: 0.95rem; } }
 
 .lotus { width: clamp(46px, 10vmin, 76px); height: auto; aspect-ratio: 80 / 52; display: block; margin: 0 auto; filter: drop-shadow(0 0 12px rgba(255,140,60,0.75)); animation: float 4s ease-in-out infinite; }
@@ -156,6 +156,43 @@ dialog ul[lang="hi"] { line-height: 1.65; }
   .conf, .sparks { display: none; }
   .reaction { animation: none; transform: translate(-50%,-50%); }
 }
+
+/* ===== Two screens: "menu" (title, settings, New Game) and "game" (board + tiny buttons) ===== */
+.mini { display: none; gap: 14px; justify-content: center; align-items: center; }
+.mini button { width: 46px; height: 46px; min-height: 0; padding: 0; font-size: 1.3rem; line-height: 1; border-radius: 50%; display: grid; place-items: center; }
+
+/* Menu screen */
+body[data-screen="menu"] .boardwrap,
+body[data-screen="menu"] .bar,
+body[data-screen="menu"] .status,
+body[data-screen="menu"] .mini { display: none; }
+body[data-screen="menu"] .app { max-width: 520px; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); grid-template-areas: "side"; }
+body[data-screen="menu"] .side { display: flex; flex-direction: column; grid-area: side; gap: 14px; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 2px; }
+body[data-screen="menu"] .side > :first-child { margin-top: auto; }
+body[data-screen="menu"] .side > :last-child { margin-bottom: auto; }
+body[data-screen="menu"] .controls { flex-direction: column; flex-wrap: nowrap; align-items: stretch; justify-content: flex-start; gap: 12px; width: min(360px, 100%); margin-inline: auto; }
+body[data-screen="menu"] .controls label { font-size: 0.9rem; }
+body[data-screen="menu"] .controls select,
+body[data-screen="menu"] .controls button { width: 100%; min-height: 48px; }
+body[data-screen="menu"] .lvlbadge { align-self: center; }
+body[data-screen="menu"] #new { min-height: 56px; font-size: 1.2rem; }
+
+/* Game screen: only scores, status, board and three small buttons */
+body[data-screen="game"] header,
+body[data-screen="game"] .controls { display: none; }
+body[data-screen="game"] .mini { display: flex; }
+body[data-screen="game"] .score { padding: 6px 10px; }
+body[data-screen="game"] .dot { width: 18px; height: 18px; }
+body[data-screen="game"] .score b { font-size: 1.4rem; }
+body[data-screen="game"] .status { min-height: 2.2em; font-size: 0.95rem; }
+@media not all and (min-aspect-ratio: 11/10) {
+  body[data-screen="game"] .app { grid-template-rows: auto auto minmax(0, 1fr) auto; grid-template-areas: "bar" "status" "board" "mini"; }
+  body[data-screen="game"] .mini { grid-area: mini; }
+  body[data-screen="game"] .bar { flex-wrap: nowrap; gap: 8px; }
+  body[data-screen="game"] .score { flex: 1 1 0; column-gap: 8px; }
+  body[data-screen="game"] .score .name { font-size: 0.85rem; }
+}
+@media (min-aspect-ratio: 11/10) { body[data-screen="game"] .mini { margin-top: 6px; } }
 </style>
 
 <svg class="toran" aria-hidden="true" preserveAspectRatio="none">
@@ -201,6 +238,12 @@ dialog ul[lang="hi"] { line-height: 1.65; }
     </div>
 
     <p class="status" id="status" aria-live="polite"></p>
+
+    <div class="mini" role="group" aria-label="Game buttons">
+      <button type="button" id="restart" class="ghost" title="Restart" aria-label="Restart game">&#8635;</button>
+      <button type="button" id="home" class="ghost" title="Home" aria-label="Home">&#127968;</button>
+      <button type="button" id="mute2" class="ghost" title="Sound" aria-label="Sound on or off">&#128263;</button>
+    </div>
 
     <div class="controls">
       <span class="lvlbadge" id="lvl"></span>
@@ -263,6 +306,7 @@ dialog ul[lang="hi"] { line-height: 1.65; }
   <p>Win to move up a level, or pick a different difficulty. Start a new game any time.</p>
   <div class="dlgBtns">
     <button type="button" id="overView" class="ghost">View Board</button>
+    <button type="button" id="overHome" class="ghost">Home</button>
     <button type="button" id="overAgain">Play Again</button>
   </div>
 </dialog>
