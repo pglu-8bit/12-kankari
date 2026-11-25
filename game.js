@@ -115,12 +115,12 @@
   audio.src=new URL('assets/music.mp3',document.baseURI).href;
   var soundOn=false;
   function startAudio(){if(!soundOn||paused)return;var play=audio.play();if(play&&play.catch)play.catch(function(){});}
-  function startFromGesture(e){if(e&&e.target&&e.target.closest&&e.target.closest('#mute'))return;startAudio();}
+  function startFromGesture(e){if(e&&e.target&&e.target.closest&&e.target.closest('#mute,#mute2'))return;startAudio();}
   document.addEventListener('pointerdown',startFromGesture);document.addEventListener('keydown',startFromGesture);
   function stopAudio(){audio.pause();}
   function applyMasterVolume(){var c=getCtx.ctx;if(c&&getCtx.master){var g=getCtx.master.gain;g.cancelScheduledValues(c.currentTime);g.setValueAtTime(soundOn?1:0,c.currentTime);}}
   // One switch for everything: music, effects already scheduled, and later effects.
-  function setSound(on){soundOn=!!on;audio.muted=!soundOn;applyMasterVolume();if(soundOn)startAudio();else stopAudio();var m=$('mute');m.textContent=soundOn?'🔊 Sound: On':'🔇 Sound: Off';m.setAttribute('aria-pressed',String(!soundOn));}
+  function setSound(on){soundOn=!!on;audio.muted=!soundOn;applyMasterVolume();if(soundOn)startAudio();else stopAudio();var m=$('mute');m.textContent=soundOn?'🔊 Sound: On':'🔇 Sound: Off';m.setAttribute('aria-pressed',String(!soundOn));var m2=$('mute2');if(m2){m2.textContent=soundOn?'🔊':'🔇';m2.setAttribute('aria-pressed',String(!soundOn));}}
   function getCtx(){
     var AC=window.AudioContext||window.webkitAudioContext;if(!AC)return null;
     var ctx=getCtx.ctx;if(!ctx){ctx=getCtx.ctx=new AC();getCtx.master=ctx.createGain();getCtx.master.gain.value=soundOn?1:0;getCtx.master.connect(ctx.destination);}
@@ -323,7 +323,7 @@
     var atTop=level%PER===0;
     if(result==='win'){wins++;var score=20*level+50*totalPieces(me);total+=score;if(!atTop)level++;text+=' Score: '+score+'.';}
     render();say('<strong>'+text+'</strong>');if(result!=='draw')playTone(result==='win'?660:220,0.35);
-    setTimeout(function(){$('overTitle').textContent=text;
+    setTimeout(function(){if(document.body.dataset.screen!=='game')return;$('overTitle').textContent=text;
       $('overText').textContent=result==='win'?(atTop?'You cleared the top level of this difficulty. Pick a harder difficulty for more.':'You earned points and advanced to the next level.'):'Start another match when you are ready.';
       var d=$('dlgOver');if(d.showModal)d.showModal();else d.setAttribute('open','');
       if(result==='win')fireworks(); // CHANGED: crackers burst on a win (started after the dialog so they show on top)
@@ -341,8 +341,15 @@
   }
   function openDialog(id){var d=$(id);if(d.showModal)d.showModal();else d.setAttribute('open','');}
   makeBoard();
-  $('new').addEventListener('click',newGame);$('overAgain').addEventListener('click',newGame);
-  $('diff').addEventListener('change',function(){level=parseInt(this.value,10)*PER+1;newGame();});
+  function setScreen(name){document.body.dataset.screen=name;}
+  function startGame(){setScreen('game');newGame();}
+  function goHome(){
+    stopFireworks();if(computerTimer){clearTimeout(computerTimer);computerTimer=null;}
+    ['dlgOver','dlgRules'].forEach(function(id){var d=$(id);if(d.open&&d.close)d.close();else d.removeAttribute('open');});
+    busy=false;ended=true;updateUI();setScreen('menu');
+  }
+  $('new').addEventListener('click',startGame);$('restart').addEventListener('click',newGame);$('home').addEventListener('click',goHome);$('overHome').addEventListener('click',goHome);$('mute2').addEventListener('click',function(){setSound(!soundOn);});$('overAgain').addEventListener('click',newGame);
+  $('diff').addEventListener('change',function(){level=parseInt(this.value,10)*PER+1;updateUI();});
   $('overView').addEventListener('click',function(){var d=$('dlgOver');if(d.close)d.close();else d.removeAttribute('open');});
   $('rulesBtn').addEventListener('click',function(){openDialog('dlgRules');});$('rulesBack').addEventListener('click',function(){var d=$('dlgRules');if(d.close)d.close();else d.removeAttribute('open');});
   $('langEn').addEventListener('click',function(){$('rulesHi').hidden=true;$('rulesEn').hidden=false;$('langEn').setAttribute('aria-pressed','true');$('langHi').setAttribute('aria-pressed','false');});
@@ -353,5 +360,5 @@
     // The platform can turn sound off, but it can no longer turn it on by itself.
     yt.system.onAudioEnabledChange(function(on){if(!on)setSound(false);});}catch(e){}}
   setSound(false); // sets the button label to "Sound: Off" on load
-  newGame();
+  render(); // first screen is the menu; the game starts when New Game is pressed
 })();
